@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PeerJS Audio Call</title>
+  <script src="https://cdn.jsdelivr.net/npm/peerjs/dist/peerjs.min.js"></script>
+<body>
+  <h1>PeerJS Audio Call</h1>
+  
+  <audio id="localAudio" autoplay muted></audio>
+  <audio id="remoteAudio" autoplay></audio>
+
+  <script>
+    let localPeer = new Peer();
+    let localStream;
+    let peerConnection;
+    const localAudio = document.getElementById('localAudio');
+    const remoteAudio = document.getElementById('remoteAudio');
+    let remotePeerId = null;
+
+    localPeer.on('open', (id) => {
+      console.log('Meu ID do Peer:', id);
+      alert(`Seu ID do Peer: ${id}`);
+      
+      const remoteId = prompt('Digite o ID do Peer para conectar:');
+      if (remoteId) {
+        remotePeerId = remoteId;
+        connectToPeer(remoteId);
+      }
+    });
+
+    function connectToPeer(peerId) {
+      const connection = localPeer.connect(peerId);
+      connection.on('open', () => {
+        console.log('Conectado ao Peer:', peerId);
+        startCall(peerId);
+      });
+
+      connection.on('data', (data) => {
+        if (data.answer) {
+          handleAnswer(data.answer);
+        } else if (data.candidate) {
+          handleCandidate(data.candidate);
+        }
+      });
+    }
+
+    async function handleAnswer(answer) {
+      const desc = new RTCSessionDescription(answer);
+      await peerConnection.setRemoteDescription(desc);
+    }
+
+    function handleCandidate(candidate) {
+      const iceCandidate = new RTCIceCandidate(candidate);
+      peerConnection.addIceCandidate(iceCandidate);
+    }
+
+    async function startCall(peerId) {
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        localAudio.srcObject = localStream;
+
+        peerConnection = new RTCPeerConnection();
+
+        localStream.getTracks().forEach(track => {
+          peerConnection.addTrack(track, localStream);
+        });
+
+        peerConnection.ontrack = (event) => {
+          remoteAudio.srcObject = event.streams[0];
+        };
+
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+        console.log('Oferta enviada:', offer);
+
+        const connection = localPeer.connections[peerId][0];
+        connection.send({ offer: offer });
+
+        peerConnection.onicecandidate = (event) => {
+          if (event.candidate) {
+            connection.send({ candidate: event.candidate.toJSON() });
+          }
+        };
+
+      } catch (err) {
+        console.error('Erro ao iniciar chamada:', err);
+      }
+    }
+
+    localPeer.on('call', (call) => {
+      console.log('Recebendo chamada de Peer:', call.peer);
+
+      call.answer(localStream);
+      call.on('stream', (remoteStream) => {
+        remoteAudio.srcObject = remoteStream;
+      });
+
+      call.on('icecandidate', (event) => {
+        if (event.candidate) {
+          const connection = localPeer.connections[call.peer][0];
+          connection.send({ candidate: event.candidate.toJSON() });
+        }
+      });
+    });
+  </script>
+</body>
+</html>
+
