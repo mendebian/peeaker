@@ -1,110 +1,108 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PeerJS Audio Call</title>
-  <script src="https://cdn.jsdelivr.net/npm/peerjs/dist/peerjs.min.js"></script>
+  <title>Soyuz - Call WebRTC</title>
+</head>
 <body>
-  <h1>PeerJS Audio Call</h1>
-  
+  <h2>Exemplo WebRTC - Comunicação de Áudio</h2>
+
   <audio id="localAudio" autoplay muted></audio>
   <audio id="remoteAudio" autoplay></audio>
 
+  <script src="https://cdn.jsdelivr.net/npm/peerjs/dist/peerjs.min.js"></script>
   <script>
-    let localPeer = new Peer();
-    let localStream;
-    let peerConnection;
     const localAudio = document.getElementById('localAudio');
     const remoteAudio = document.getElementById('remoteAudio');
-    let remotePeerId = null;
-
-    localPeer.on('open', (id) => {
-      console.log('Meu ID do Peer:', id);
-      alert(`Seu ID do Peer: ${id}`);
-      
-      const remoteId = prompt('Digite o ID do Peer para conectar:');
-      if (remoteId) {
-        remotePeerId = remoteId;
-        connectToPeer(remoteId);
-      }
-    });
-
-    function connectToPeer(peerId) {
-      const connection = localPeer.connect(peerId);
-      connection.on('open', () => {
-        console.log('Conectado ao Peer:', peerId);
-        startCall(peerId);
-      });
-
-      connection.on('data', (data) => {
-        if (data.answer) {
-          handleAnswer(data.answer);
-        } else if (data.candidate) {
-          handleCandidate(data.candidate);
+    
+    // Variáveis de controle
+    let localStream;
+    let localPeer;
+    let currentConnection;
+    
+    // Acessando o áudio local
+    async function getLocalAudio() {
+        try {
+            localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            localAudio.srcObject = localStream;
+        } catch (err) {
+            console.error('Erro ao acessar áudio:', err);
         }
-      });
     }
-
-    async function handleAnswer(answer) {
-      const desc = new RTCSessionDescription(answer);
-      await peerConnection.setRemoteDescription(desc);
-    }
-
-    function handleCandidate(candidate) {
-      const iceCandidate = new RTCIceCandidate(candidate);
-      peerConnection.addIceCandidate(iceCandidate);
-    }
-
-    async function startCall(peerId) {
-      try {
-        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        localAudio.srcObject = localStream;
-
-        peerConnection = new RTCPeerConnection();
-
-        localStream.getTracks().forEach(track => {
-          peerConnection.addTrack(track, localStream);
+    
+    // Inicializar o PeerJS
+    function initializePeerJS() {
+        localPeer = new Peer();
+    
+        // Quando o Peer se conecta, exibe o ID
+        localPeer.on('open', id => {
+            console.log(`Seu ID do Peer: ${id}`);
+            // A lógica de conectar ao outro Peer vai aqui
+            const remoteId = prompt("Digite o ID do Peer para conectar:");
+            if (remoteId) connectToPeer(remoteId);
         });
-
-        peerConnection.ontrack = (event) => {
-          remoteAudio.srcObject = event.streams[0];
-        };
-
-        const offer = await peerConnection.createOffer();
-        await peerConnection.setLocalDescription(offer);
-        console.log('Oferta enviada:', offer);
-
-        const connection = localPeer.connections[peerId][0];
-        connection.send({ offer: offer });
-
-        peerConnection.onicecandidate = (event) => {
-          if (event.candidate) {
-            connection.send({ candidate: event.candidate.toJSON() });
-          }
-        };
-
-      } catch (err) {
-        console.error('Erro ao iniciar chamada:', err);
-      }
+    
+        // Quando o Peer recebe uma conexão
+        localPeer.on('connection', conn => {
+            console.log(`Conexão recebida de Peer ID: ${conn.peer}`);
+            currentConnection = conn;
+            currentConnection.on('open', setupConnectionHandlers);
+        });
+    
+        // Quando o Peer recebe uma chamada de áudio
+        localPeer.on('call', call => {
+            console.log("Chamada recebida!");
+            call.answer(localStream);  // Responde com o áudio local
+            call.on('stream', remoteStream => {
+                remoteAudio.srcObject = remoteStream;  // Atribui o áudio remoto
+            });
+        });
     }
-
-    localPeer.on('call', (call) => {
-      console.log('Recebendo chamada de Peer:', call.peer);
-
-      call.answer(localStream);
-      call.on('stream', (remoteStream) => {
-        remoteAudio.srcObject = remoteStream;
-      });
-
-      call.on('icecandidate', (event) => {
-        if (event.candidate) {
-          const connection = localPeer.connections[call.peer][0];
-          connection.send({ candidate: event.candidate.toJSON() });
+    
+    // Conectar ao Peer remoto
+    function connectToPeer(peerId) {
+        console.log(`Conectando ao Peer ID: ${peerId}`);
+        const call = localPeer.call(peerId, localStream);  // Inicia uma chamada com o áudio local
+    
+        call.on('stream', remoteStream => {
+            remoteAudio.srcObject = remoteStream;  // Atribui o áudio remoto
+        });
+    
+        call.on('close', () => {
+            console.log("Chamada fechada.");
+        });
+    }
+    
+    // Configurar os manipuladores de conexão para a troca de dados
+    function setupConnectionHandlers() {
+        currentConnection.on('data', data => {
+            console.log('Dados recebidos:', data);
+        });
+    
+        currentConnection.on('close', () => {
+            console.log('Conexão fechada.');
+            currentConnection = null;
+        });
+    }
+    
+    // Iniciar a chamada quando a página carregar
+    async function startCall() {
+        await getLocalAudio();
+        initializePeerJS();
+    }
+    
+    // Enviar dados para o Peer conectado
+    function sendData(data) {
+        if (currentConnection && currentConnection.open) {
+            currentConnection.send(data);
+            console.log("Dados enviados:", data);
+        } else {
+            console.error("Nenhuma conexão aberta para enviar dados.");
         }
-      });
-    });
+    }
+    
+    startCall();
   </script>
 </body>
 </html>
-
